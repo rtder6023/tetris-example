@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import MiniBoard from "../miniBoard/MiniBoard";
 import { randomTetromino } from "@/components/tetromino/Tetromino";
+import Modal from "../modal/Modal";
 
 const MainContent = () => {
   const rows = 20;
@@ -20,6 +21,7 @@ const MainContent = () => {
   const [isPaused, setIsPaused] = useState(false);
   const [isStarted, setIsStarted] = useState(false);
   const [score, setScore] = useState(0);
+  const [modalType, setModalType] = useState(null);
 
   const rotate = (matrix) => {
     const N = matrix.length;
@@ -275,10 +277,20 @@ const MainContent = () => {
         <div className="border border-black p-2 flex-1 text-center">
           Ranking
         </div>
-        <div className="border border-black p-2 text-center text-xs">
-          로그아웃
+        <div
+          className="border border-black p-2 text-center cursor-pointer underline text-1xl"
+          onClick={() => setModalType("login")}
+        >
+          로그인
           <br />
-          설정
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              setModalType("signup");
+            }}
+          >
+            회원가입
+          </span>
         </div>
       </div>
 
@@ -337,6 +349,49 @@ const MainContent = () => {
         </div>
         <div className="text-center text-xs">HOLD</div>
       </div>
+      <Modal isOpen={modalType !== null} onClose={() => setModalType(null)}>
+        {modalType === "login" && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">로그인</h2>
+            <input
+              type="text"
+              placeholder="아이디"
+              className="border w-full mb-2 p-1 outline-0"
+            />
+            <input
+              type="password"
+              placeholder="비밀번호"
+              className="border w-full mb-4 p-1 outline-0"
+            />
+            <button className="bg-blue-500 text-white px-4 py-2 rounded w-full">
+              로그인
+            </button>
+          </div>
+        )}
+        {modalType === "signup" && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">회원가입</h2>
+            <input
+              type="text"
+              placeholder="아이디"
+              className="border w-full mb-2 p-1 outline-0"
+            />
+            <input
+              type=""
+              placeholder="이름"
+              className="border w-full mb-2 p-1 outline-0"
+            />
+            <input
+              type="password"
+              placeholder="비밀번호"
+              className="border w-full mb-4 p-1 outline-0"
+            />
+            <button className="bg-green-500 text-white px-4 py-2 rounded w-full">
+              회원가입
+            </button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
