@@ -22,6 +22,15 @@ const MainContent = () => {
   const [isStarted, setIsStarted] = useState(false);
   const [score, setScore] = useState(0);
   const [modalType, setModalType] = useState(null);
+  const [showRetryModal, setShowRetryModal] = useState(false);
+
+  const getGhostPosition = (board, tetromino, pos) => {
+    let ghostPos = { ...pos };
+    while (canMoveTo(board, tetromino, { x: ghostPos.x, y: ghostPos.y + 1 })) {
+      ghostPos.y += 1;
+    }
+    return ghostPos;
+  };
 
   const rotate = (matrix) => {
     const N = matrix.length;
@@ -32,6 +41,20 @@ const MainContent = () => {
       }
     }
     return result;
+  };
+
+  const resetGame = () => {
+    setBoard(Array.from({ length: rows }, () => Array(cols).fill(0)));
+    setTetromino(randomTetromino());
+    setNextTetromino(randomTetromino());
+    setHoldTetromino(null);
+    setCanHold(true);
+    setPos({ x: 3, y: 0 });
+    setIsGameOver(false);
+    setIsPaused(false);
+    setScore(0);
+    setIsStarted(true);
+    setModalType(null);
   };
 
   const Kick = () => [
@@ -151,6 +174,11 @@ const MainContent = () => {
 
     setCanHold(false);
   };
+  useEffect(() => {
+    if (isGameOver) {
+      setModalType("gameover");
+    }
+  }, [isGameOver]);
 
   useEffect(() => {
     if (!tetromino || isGameOver || isPaused || !isStarted) return;
@@ -171,6 +199,7 @@ const MainContent = () => {
 
         if (!canMoveTo(newBoard, newTetromino, newPos)) {
           setIsGameOver(true);
+          setShowRetryModal(true);
         } else {
           setBoard(newBoard);
           setTetromino(newTetromino);
@@ -248,26 +277,41 @@ const MainContent = () => {
     }
   }, [isStarted, tetromino]);
 
-  const displayBoard = board.map((row, y) =>
-    row.map((cell, x) => {
-      const shape = tetromino?.shape;
-      const blockY = y - pos.y;
-      const blockX = x - pos.x;
+  const displayBoard = board.map((row) => [...row]);
 
-      if (
-        tetromino &&
-        blockY >= 0 &&
-        blockY < shape.length &&
-        blockX >= 0 &&
-        blockX < shape[0].length &&
-        shape[blockY][blockX] !== 0
-      ) {
-        return tetromino.color;
-      }
+  if (tetromino) {
+    const ghostPos = getGhostPosition(board, tetromino, pos);
 
-      return cell;
-    })
-  );
+    tetromino.shape.forEach((row, dy) => {
+      row.forEach((cell, dx) => {
+        if (cell !== 0) {
+          const gy = ghostPos.y + dy;
+          const gx = ghostPos.x + dx;
+          if (
+            gy >= 0 &&
+            gy < rows &&
+            gx >= 0 &&
+            gx < cols &&
+            displayBoard[gy][gx] === 0
+          ) {
+            displayBoard[gy][gx] = `ghost-${tetromino.color}`;
+          }
+        }
+      });
+    });
+
+    tetromino.shape.forEach((row, dy) => {
+      row.forEach((cell, dx) => {
+        if (cell !== 0) {
+          const py = pos.y + dy;
+          const px = pos.x + dx;
+          if (py >= 0 && py < rows && px >= 0 && px < cols) {
+            displayBoard[py][px] = tetromino.color;
+          }
+        }
+      });
+    });
+  }
 
   return (
     <div className="flex h-screen p-2 gap-2 text-sm">
@@ -312,7 +356,11 @@ const MainContent = () => {
               <div
                 key={idx}
                 className={`border border-gray-400 w-[40px] h-[40px] ${
-                  typeof cell === "string" ? cell : "bg-white"
+                  typeof cell === "string"
+                    ? cell.startsWith("ghost-")
+                      ? `${cell.replace("ghost-", "")} opacity-40`
+                      : cell
+                    : "bg-white"
                 }`}
               ></div>
             ))}
@@ -388,6 +436,28 @@ const MainContent = () => {
             />
             <button className="bg-green-500 text-white px-4 py-2 rounded w-full">
               회원가입
+            </button>
+          </div>
+        )}
+        {modalType === "gameover" && (
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-4">게임 종료</h2>
+            <p className="mb-4">
+              다시 하시겠습니까?
+              <br />
+              점수는 {score}점입니다.
+            </p>
+            <button
+              onClick={resetGame}
+              className="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2"
+            >
+              다시 시작
+            </button>
+            <button
+              onClick={() => setModalType(null)}
+              className="bg-gray-300 text-black px-4 py-2 rounded w-full"
+            >
+              닫기
             </button>
           </div>
         )}
