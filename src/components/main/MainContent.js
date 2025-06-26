@@ -23,6 +23,21 @@ const MainContent = () => {
   const [score, setScore] = useState(0);
   const [modalType, setModalType] = useState(null);
   const [showRetryModal, setShowRetryModal] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [linesClearedTotal, setLinesClearedTotal] = useState(0);
+  const levelSpeeds = [
+    800, // level 0
+    716, // level 1
+    633, // level 2
+    550, // level 3
+    466, // level 4
+    383, // level 5
+    300, // level 6
+    216, // level 7
+    133, // level 8
+    100, // level 9
+    83, // level 10+
+  ];
 
   const getGhostPosition = (board, tetromino, pos) => {
     let ghostPos = { ...pos };
@@ -53,6 +68,8 @@ const MainContent = () => {
     setIsGameOver(false);
     setIsPaused(false);
     setScore(0);
+    setLevel(0);
+    setLinesClearedTotal(0);
     setIsStarted(true);
     setModalType(null);
   };
@@ -183,15 +200,23 @@ const MainContent = () => {
   useEffect(() => {
     if (!tetromino || isGameOver || isPaused || !isStarted) return;
 
+    const speed = levelSpeeds[Math.min(level, 10)];
+
     const interval = setInterval(() => {
       const nextPos = { x: pos.x, y: pos.y + 1 };
-
       if (canMoveTo(board, tetromino, nextPos)) {
         setPos(nextPos);
       } else {
         let mergedBoard = mergeBlock(board, tetromino, pos);
         const { newBoard, clearedLines } = clearLines(mergedBoard);
+
         setScore((prev) => prev + calculateScore(clearedLines));
+        setLinesClearedTotal((prev) => {
+          const total = prev + clearedLines;
+          const newLevel = Math.floor(total / 10) + 1;
+          setLevel(Math.min(newLevel, 10));
+          return total;
+        });
 
         const newTetromino = nextTetromino || randomTetromino();
         const newNext = randomTetromino();
@@ -208,15 +233,21 @@ const MainContent = () => {
           setCanHold(true);
         }
       }
-    }, 500);
+    }, speed);
 
     return () => clearInterval(interval);
-  }, [board, pos, tetromino, isGameOver, isPaused, isStarted]);
+  }, [board, pos, tetromino, isGameOver, isPaused, isStarted, level]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "p" || e.key === "P") {
-        setIsPaused((prev) => !prev);
+        if (!isPaused) {
+          setIsPaused(true);
+          setModalType("pause");
+        } else {
+          setIsPaused(false);
+          setModalType(null);
+        }
         return;
       }
 
@@ -249,7 +280,12 @@ const MainContent = () => {
         let mergedBoard = mergeBlock(board, tetromino, finalPos);
         const { newBoard, clearedLines } = clearLines(mergedBoard);
         setScore((prev) => prev + calculateScore(clearedLines));
-
+        setLinesClearedTotal((prev) => {
+          const total = prev + clearedLines;
+          const newLevel = Math.floor(total / 10);
+          setLevel(newLevel);
+          return total;
+        });
         const newTetromino = nextTetromino || randomTetromino();
         const newNext = randomTetromino();
         const newPos = { x: 3, y: 0 };
@@ -386,6 +422,7 @@ const MainContent = () => {
 
       <div className="flex flex-col w-[200px] gap-2">
         <div className="border border-black p-2 text-center">점수: {score}</div>
+        <div className="border border-black p-2 text-center">레벨: {level}</div>
 
         <div className="border border-black p-2 flex justify-center items-center">
           <MiniBoard nextTetromino={nextTetromino} />
@@ -458,6 +495,30 @@ const MainContent = () => {
               className="bg-gray-300 text-black px-4 py-2 rounded w-full"
             >
               닫기
+            </button>
+          </div>
+        )}
+        {modalType === "pause" && (
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-4">일시정지</h2>
+            <button
+              onClick={() => {
+                setIsPaused(false);
+                setModalType(null);
+              }}
+              className="bg-green-500 text-white px-4 py-2 rounded w-full mb-2"
+            >
+              계속 하기
+            </button>
+            <button
+              onClick={() => {
+                setIsPaused(false);
+                setIsStarted(false);
+                resetGame();
+              }}
+              className="bg-red-500 text-white px-4 py-2 rounded w-full"
+            >
+              그만 하기
             </button>
           </div>
         )}
