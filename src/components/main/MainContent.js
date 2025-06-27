@@ -1,6 +1,5 @@
 "use client";
-
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import MiniBoard from "../miniBoard/MiniBoard";
 import { randomTetromino } from "@/components/tetromino/Tetromino";
 import Modal from "../modal/Modal";
@@ -25,6 +24,7 @@ const MainContent = () => {
   const [showRetryModal, setShowRetryModal] = useState(false);
   const [level, setLevel] = useState(0);
   const [linesClearedTotal, setLinesClearedTotal] = useState(0);
+  const [user, setUser] = useState([]); // null이면 로그인 안 됨, 객체면 로그인된 상태
   const levelSpeeds = [
     800, // level 0
     716, // level 1
@@ -197,46 +197,52 @@ const MainContent = () => {
     }
   }, [isGameOver]);
 
+  const intervalRef = useRef(null); // 이건 컴포넌트 최상단 useState 들 옆에 추가
+
   useEffect(() => {
     if (!tetromino || isGameOver || isPaused || !isStarted) return;
 
-    const speed = levelSpeeds[Math.min(level, 10)];
+    const tick = () => {
+      setPos((prevPos) => {
+        const nextPos = { x: prevPos.x, y: prevPos.y + 1 };
 
-    const interval = setInterval(() => {
-      const nextPos = { x: pos.x, y: pos.y + 1 };
-      if (canMoveTo(board, tetromino, nextPos)) {
-        setPos(nextPos);
-      } else {
-        let mergedBoard = mergeBlock(board, tetromino, pos);
-        const { newBoard, clearedLines } = clearLines(mergedBoard);
-
-        setScore((prev) => prev + calculateScore(clearedLines));
-        setLinesClearedTotal((prev) => {
-          const total = prev + clearedLines;
-          const newLevel = Math.floor(total / 10) + 1;
-          setLevel(Math.min(newLevel, 10));
-          return total;
-        });
-
-        const newTetromino = nextTetromino || randomTetromino();
-        const newNext = randomTetromino();
-        const newPos = { x: 3, y: 0 };
-
-        if (!canMoveTo(newBoard, newTetromino, newPos)) {
-          setIsGameOver(true);
-          setShowRetryModal(true);
+        if (canMoveTo(board, tetromino, nextPos)) {
+          return nextPos;
         } else {
-          setBoard(newBoard);
-          setTetromino(newTetromino);
-          setNextTetromino(newNext);
-          setPos(newPos);
-          setCanHold(true);
-        }
-      }
-    }, speed);
+          const mergedBoard = mergeBlock(board, tetromino, prevPos);
+          const { newBoard, clearedLines } = clearLines(mergedBoard);
 
-    return () => clearInterval(interval);
-  }, [board, pos, tetromino, isGameOver, isPaused, isStarted, level]);
+          setScore((prev) => prev + calculateScore(clearedLines));
+          setLinesClearedTotal((prev) => {
+            const total = prev + clearedLines;
+            setLevel(Math.min(Math.floor(total / 10), 10));
+            return total;
+          });
+
+          const newTetromino = nextTetromino || randomTetromino();
+          const newNext = randomTetromino();
+          const newStartPos = { x: 3, y: 0 };
+
+          if (!canMoveTo(newBoard, newTetromino, newStartPos)) {
+            setIsGameOver(true);
+            setShowRetryModal(true);
+            return prevPos;
+          } else {
+            setBoard(newBoard);
+            setTetromino(newTetromino);
+            setNextTetromino(newNext);
+            setCanHold(true);
+            return newStartPos;
+          }
+        }
+      });
+    };
+
+    const speed = levelSpeeds[Math.min(level, 10)];
+    intervalRef.current = setInterval(tick, speed);
+
+    return () => clearInterval(intervalRef.current);
+  }, [isStarted, isPaused, isGameOver, level, tetromino]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -352,26 +358,57 @@ const MainContent = () => {
   return (
     <div className="flex h-screen p-2 gap-2 text-sm">
       <div className="flex flex-col w-[200px] gap-2">
-        <div className="border border-black p-2 text-center">이름</div>
-        <div className="border border-black p-2 text-center">개인 최고기록</div>
-        <div className="border border-black p-2 flex-1 text-center">
-          Ranking
-        </div>
-        <div
-          className="border border-black p-2 text-center cursor-pointer underline text-1xl"
-          onClick={() => setModalType("login")}
-        >
-          로그인
-          <br />
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              setModalType("signup");
-            }}
-          >
-            회원가입
-          </span>
-        </div>
+        {/* 로그인 상태일 때 */}
+        {user ? (
+          <>
+            <div className="border border-black p-2 text-center">
+              {user.username}
+            </div>
+            <div className="border border-black p-2 text-center">
+              {user.highScore}
+            </div>
+            <div className="border border-black p-2 flex-1 text-center">
+              Ranking
+            </div>
+            <div className="border border-black p-2 text-center space-y-1">
+              <button
+                className="w-full underline cursor-pointer"
+                onClick={() => setUser(null)} // 로그아웃
+              >
+                로그아웃
+              </button>
+              <button
+                className="w-full underline cursor-pointer"
+                onClick={() => setModalType("settings")}
+              >
+                설정
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* 로그인 안 된 상태일 때 */}
+            <div className="border border-black p-2 text-center">Guest</div>
+            <div className="border border-black p-2 flex-1 text-center">
+              Ranking
+            </div>
+            <div
+              className="border border-black p-2 text-center cursor-pointer underline text-1xl"
+              onClick={() => setModalType("login")}
+            >
+              로그인
+              <br />
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setModalType("signup");
+                }}
+              >
+                회원가입
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="flex-1 flex justify-center items-center">
@@ -419,11 +456,11 @@ const MainContent = () => {
           )}
         </div>
       </div>
-
+      {user ? (
+          <>
       <div className="flex flex-col w-[200px] gap-2">
-        <div className="border border-black p-2 text-center">점수: {score}</div>
-        <div className="border border-black p-2 text-center">레벨: {level}</div>
-
+        <div className="border border-black p-2 text-center">점수: {score} <br />
+        레벨: {level}</div>
         <div className="border border-black p-2 flex justify-center items-center">
           <MiniBoard nextTetromino={nextTetromino} />
         </div>
@@ -434,6 +471,10 @@ const MainContent = () => {
         </div>
         <div className="text-center text-xs">HOLD</div>
       </div>
+      </>) : (
+        <>
+        </>
+      )}
       <Modal isOpen={modalType !== null} onClose={() => setModalType(null)}>
         {modalType === "login" && (
           <div>
@@ -519,6 +560,44 @@ const MainContent = () => {
               className="bg-red-500 text-white px-4 py-2 rounded w-full"
             >
               그만 하기
+            </button>
+          </div>
+        )}
+        {modalType === "settings" && user && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">프로필 설정</h2>
+            <input
+              type="text"
+              defaultValue={user.username}
+              placeholder="유저 이름"
+              className="border w-full mb-2 p-1"
+            />
+            <input
+              type="text"
+              defaultValue={user.bio}
+              placeholder="소개글"
+              className="border w-full mb-2 p-1"
+            />
+            <input
+              type="text"
+              defaultValue={user.profile}
+              placeholder="프로필 이미지 URL"
+              className="border w-full mb-4 p-1"
+            />
+            <button
+              onClick={() => {
+                // 프로필 업데이트 로직 예시
+                setUser((prev) => ({
+                  ...prev,
+                  username: "새 이름",
+                  bio: "새 소개글",
+                  profile: "새 URL",
+                }));
+                setModalType(null);
+              }}
+              className="bg-green-500 text-white px-4 py-2 rounded w-full"
+            >
+              저장
             </button>
           </div>
         )}
