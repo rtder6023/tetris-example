@@ -1,12 +1,18 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useContext } from "react";
 import MiniBoard from "../miniBoard/MiniBoard";
 import { randomTetromino } from "@/components/tetromino/Tetromino";
+import { Tetromino_Show, Tetromino } from "@/components/tetromino/Tetromino";
 import Modal from "../modal/Modal";
+import NextQueue from "../nextqueue/NextQueue";
+import { axios } from "@/libs/axios/axios";
+import { UserContext } from "@/states/UserContext";
 
 const MainContent = () => {
   const rows = 20;
   const cols = 10;
+
+  const { user, setUser } = useContext(UserContext);
 
   const [board, setBoard] = useState(
     Array.from({ length: rows }, () => Array(cols).fill(0))
@@ -24,7 +30,16 @@ const MainContent = () => {
   const [showRetryModal, setShowRetryModal] = useState(false);
   const [level, setLevel] = useState(0);
   const [linesClearedTotal, setLinesClearedTotal] = useState(0);
-  const [user, setUser] = useState([]); // null이면 로그인 안 됨, 객체면 로그인된 상태
+  const [showGhost, setShowGhost] = useState(true); // 기본 켜진 상태로 설정
+  const upPressedRef = useRef(false);
+  const [inputId, setInputId] = useState("");
+  const [inputPW, setInputPW] = useState("");
+  const [inputName, setInputName] = useState("");
+
+  const [nextQueue, setNextQueue] = useState(
+    Array.from({ length: 5 }, () => randomTetromino())
+  );
+
   const levelSpeeds = [
     800, // level 0
     716, // level 1
@@ -38,6 +53,12 @@ const MainContent = () => {
     100, // level 9
     83, // level 10+
   ];
+
+  const findTetrominoNameByColor = (color) => {
+    return Object.entries(Tetromino).find(
+      ([_, val]) => val.color === color
+    )?.[0];
+  };
 
   const getGhostPosition = (board, tetromino, pos) => {
     let ghostPos = { ...pos };
@@ -60,8 +81,9 @@ const MainContent = () => {
 
   const resetGame = () => {
     setBoard(Array.from({ length: rows }, () => Array(cols).fill(0)));
-    setTetromino(randomTetromino());
-    setNextTetromino(randomTetromino());
+    const initialQueue = Array.from({ length: 5 }, () => randomTetromino());
+    setTetromino(initialQueue[0]);
+    setNextQueue(initialQueue.slice(1).concat(randomTetromino()));
     setHoldTetromino(null);
     setCanHold(true);
     setPos({ x: 3, y: 0 });
@@ -134,13 +156,10 @@ const MainContent = () => {
           const newY = pos.y + y;
           const newX = pos.x + x;
 
-          if (
-            newY < 0 ||
-            newY >= board.length ||
-            newX < 0 ||
-            newX >= board[0].length ||
-            board[newY][newX] !== 0
-          ) {
+          if (newX < 0 || newX >= board[0].length || newY >= board.length) {
+            return false;
+          }
+          if (newY >= 0 && board[newY][newX] !== 0) {
             return false;
           }
         }
@@ -183,14 +202,18 @@ const MainContent = () => {
       setPos({ x: 3, y: 0 });
     } else {
       setHoldTetromino(tetromino);
-      const next = nextTetromino || randomTetromino();
+
+      const next = nextQueue[0];
+      const newQueue = nextQueue.slice(1).concat(randomTetromino());
+
       setTetromino(next);
-      setNextTetromino(randomTetromino());
+      setNextQueue(newQueue);
       setPos({ x: 3, y: 0 });
     }
 
     setCanHold(false);
   };
+
   useEffect(() => {
     if (isGameOver) {
       setModalType("gameover");
@@ -219,7 +242,12 @@ const MainContent = () => {
             return total;
           });
 
-          const newTetromino = nextTetromino || randomTetromino();
+          const newTetromino = nextQueue[0];
+          const newQueue = nextQueue.slice(1).concat(randomTetromino());
+
+          setTetromino(newTetromino);
+          setNextQueue(newQueue);
+
           const newNext = randomTetromino();
           const newStartPos = { x: 3, y: 0 };
 
@@ -247,12 +275,14 @@ const MainContent = () => {
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "p" || e.key === "P") {
-        if (!isPaused) {
-          setIsPaused(true);
-          setModalType("pause");
-        } else {
-          setIsPaused(false);
-          setModalType(null);
+        if (isStarted && !isGameOver) {
+          if (!isPaused) {
+            setIsPaused(true);
+            setModalType("pause");
+          } else {
+            setIsPaused(false);
+            setModalType(null);
+          }
         }
         return;
       }
@@ -269,18 +299,27 @@ const MainContent = () => {
         if (canMoveTo(board, tetromino, nextPos)) setPos(nextPos);
       } else if (e.key === "ArrowDown") {
         const nextPos = { x: pos.x, y: pos.y + 1 };
-        if (canMoveTo(board, tetromino, nextPos)) setPos(nextPos);
+        if (canMoveTo(board, tetromino, nextPos)) {
+          setPos(nextPos);
+          setScore((prev) => prev + 1);
+        }
       } else if (e.key === "ArrowUp") {
-        const result = RotateWithKick(tetromino, board, pos);
-        if (result) {
-          setTetromino({ ...tetromino, shape: result.shape });
-          setPos(result.newPos);
+        if (!upPressedRef.current) {
+          upPressedRef.current = true;
+          const result = RotateWithKick(tetromino, board, pos);
+          if (result) {
+            setTetromino({ ...tetromino, shape: result.shape });
+            setPos(result.newPos);
+          }
         }
       } else if (e.key === " ") {
         let dropY = pos.y;
         while (canMoveTo(board, tetromino, { x: pos.x, y: dropY + 1 })) {
           dropY++;
         }
+
+        const dropDistance = dropY - pos.y;
+        setScore((prev) => prev + dropDistance * 2); // 하드 드롭 점수
 
         const finalPos = { x: pos.x, y: dropY };
         let mergedBoard = mergeBlock(board, tetromino, finalPos);
@@ -292,8 +331,9 @@ const MainContent = () => {
           setLevel(newLevel);
           return total;
         });
-        const newTetromino = nextTetromino || randomTetromino();
-        const newNext = randomTetromino();
+
+        const newTetromino = nextQueue[0];
+        const newQueue = nextQueue.slice(1).concat(randomTetromino());
         const newPos = { x: 3, y: 0 };
 
         if (!canMoveTo(newBoard, newTetromino, newPos)) {
@@ -301,15 +341,26 @@ const MainContent = () => {
         } else {
           setBoard(newBoard);
           setTetromino(newTetromino);
-          setNextTetromino(newNext);
+          setNextQueue(newQueue);
           setPos(newPos);
           setCanHold(true);
         }
       }
     };
 
+    const handleKeyUp = (e) => {
+      if (e.key === "ArrowUp") {
+        upPressedRef.current = false;
+      }
+    };
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
   }, [board, pos, tetromino, isGameOver, isPaused, isStarted, canHold]);
 
   useEffect(() => {
@@ -324,23 +375,25 @@ const MainContent = () => {
   if (tetromino) {
     const ghostPos = getGhostPosition(board, tetromino, pos);
 
-    tetromino.shape.forEach((row, dy) => {
-      row.forEach((cell, dx) => {
-        if (cell !== 0) {
-          const gy = ghostPos.y + dy;
-          const gx = ghostPos.x + dx;
-          if (
-            gy >= 0 &&
-            gy < rows &&
-            gx >= 0 &&
-            gx < cols &&
-            displayBoard[gy][gx] === 0
-          ) {
-            displayBoard[gy][gx] = `ghost-${tetromino.color}`;
+    if (showGhost) {
+      tetromino.shape.forEach((row, dy) => {
+        row.forEach((cell, dx) => {
+          if (cell !== 0) {
+            const gy = ghostPos.y + dy;
+            const gx = ghostPos.x + dx;
+            if (
+              gy >= 0 &&
+              gy < rows &&
+              gx >= 0 &&
+              gx < cols &&
+              displayBoard[gy][gx] === 0
+            ) {
+              displayBoard[gy][gx] = `ghost-${tetromino.color}`;
+            }
           }
-        }
+        });
       });
-    });
+    }
 
     tetromino.shape.forEach((row, dy) => {
       row.forEach((cell, dx) => {
@@ -355,71 +408,109 @@ const MainContent = () => {
     });
   }
 
+  const handleLogin = async () => {
+    const { data, status } = await axios("/common/login", "POST", {
+      username: inputId,
+      pw: inputPW,
+    });
+
+    if (status === 200) {
+      setModalType(null);
+
+      // axios -> 내 로그인된 정보를 반환받을거임(username, maxScore)
+      setUser(true);
+    } else {
+      alert("아이디나 비밀번호를 확인해 주세요.");
+    }
+  };
+
+  const handleSignUp = async () => {
+    const { data, status } = await axios("/common/user", "POST", {
+      username: inputId,
+      pw: inputPW,
+      name: inputName,
+    });
+
+    if (status === 200) {
+      setModalType(null);
+    } else {
+      alert(data);
+    }
+  };
+
   return (
-    <div className="flex h-screen p-2 gap-2 text-sm">
-      <div className="flex flex-col w-[200px] gap-2">
-        {/* 로그인 상태일 때 */}
-        {user ? (
-          <>
-            <div className="border border-black p-2 text-center">
-              {user.username}
-            </div>
-            <div className="border border-black p-2 text-center">
-              {user.highScore}
-            </div>
-            <div className="border border-black p-2 flex-1 text-center">
-              Ranking
-            </div>
-            <div className="border border-black p-2 text-center space-y-1">
+    <div className="flex h-screen p-2 gap-4 bg-gray-100 font-sans text-gray-800">
+      {/* 왼쪽 사이드 */}
+      <div className="flex flex-col w-[200px] gap-3 text-center">
+        <div className="bg-white p-3 rounded-lg shadow border  font-bold text-lg">
+          {user ? user.username : "GUEST"}
+        </div>
+
+        {user && (
+          <div className="bg-white p-2 rounded-lg shadow border text-sm">
+            최고 점수: {user.highScore}
+          </div>
+        )}
+
+        <div className="space-y-2 mt-auto">
+          {user ? (
+            <>
               <button
-                className="w-full underline cursor-pointer"
-                onClick={() => setUser(null)} // 로그아웃
+                className="w-full py-1 bg-red-500 text-white rounded shadow hover:bg-red-600"
+                onClick={() => {
+                  if (isStarted) {
+                    const confirmLogout = window.confirm(
+                      "게임을 저장하고 로그아웃 하시겠습니까?"
+                    );
+                    if (!confirmLogout) return;
+
+                    resetGame();
+                  }
+                  setUser(null);
+                }}
               >
                 로그아웃
               </button>
+
               <button
-                className="w-full underline cursor-pointer"
+                className="w-full py-1 bg-gray-500 text-white rounded shadow hover:bg-gray-600"
                 onClick={() => setModalType("settings")}
               >
                 설정
               </button>
-            </div>
-          </>
-        ) : (
-          <>
-            {/* 로그인 안 된 상태일 때 */}
-            <div className="border border-black p-2 text-center">Guest</div>
-            <div className="border border-black p-2 flex-1 text-center">
-              Ranking
-            </div>
-            <div
-              className="border border-black p-2 text-center cursor-pointer underline text-1xl"
-              onClick={() => setModalType("login")}
-            >
-              로그인
-              <br />
-              <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setModalType("signup");
-                }}
+            </>
+          ) : (
+            <>
+              <button
+                className="w-full py-1 bg-blue-500 text-white rounded shadow hover:bg-blue-600"
+                onClick={() => setModalType("login")}
+              >
+                로그인
+              </button>
+              <button
+                className="w-full py-1 bg-green-500 text-white rounded shadow hover:bg-green-600"
+                onClick={() => setModalType("signup")}
               >
                 회원가입
-              </span>
-            </div>
-          </>
-        )}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 flex justify-center items-center">
         <div
           className="flex items-center justify-center h-screen gap-10 relative"
           onClick={() => {
+            if (!user) {
+              alert("로그인 후 게임을 시작할 수 있습니다.");
+              return;
+            }
             if (!isStarted) setIsStarted(true);
           }}
         >
           <div
-            className="grid border border-black"
+            className="grid border-2 border-gray-700 bg-gray-100 rounded-lg shadow-lg"
             style={{
               gridTemplateRows: `repeat(${rows}, 40px)`,
               gridTemplateColumns: `repeat(${cols}, 40px)`,
@@ -428,14 +519,14 @@ const MainContent = () => {
             {displayBoard.flat().map((cell, idx) => (
               <div
                 key={idx}
-                className={`border border-gray-400 w-[40px] h-[40px] ${
+                className={`w-[40px] h-[40px] border border-gray-300 ${
                   typeof cell === "string"
                     ? cell.startsWith("ghost-")
-                      ? `${cell.replace("ghost-", "")} opacity-40`
-                      : cell
+                      ? `${cell.replace("ghost-", "")} opacity-30`
+                      : `${cell} shadow-md`
                     : "bg-white"
                 }`}
-              ></div>
+              />
             ))}
           </div>
 
@@ -444,36 +535,28 @@ const MainContent = () => {
               클릭해서 시작
             </div>
           )}
-          {isGameOver && (
-            <div className="absolute text-4xl font-bold text-red-600">
-              게임 종료
-            </div>
-          )}
-          {isPaused && !isGameOver && (
-            <div className="absolute text-4xl font-bold text-yellow-600">
-              일시정지
-            </div>
-          )}
         </div>
       </div>
       {user ? (
-          <>
-      <div className="flex flex-col w-[200px] gap-2">
-        <div className="border border-black p-2 text-center">점수: {score} <br />
-        레벨: {level}</div>
-        <div className="border border-black p-2 flex justify-center items-center">
-          <MiniBoard nextTetromino={nextTetromino} />
-        </div>
-        <div className="text-center text-xs">NEXT</div>
-
-        <div className="border border-black p-2 flex justify-center items-center">
-          <MiniBoard nextTetromino={holdTetromino} />
-        </div>
-        <div className="text-center text-xs">HOLD</div>
-      </div>
-      </>) : (
         <>
+          <div className="flex flex-col w-[200px] gap-2">
+            <div className="bg-white p-2 rounded-lg shadow border text-sm  flex justify-center items-center text-center">
+              점수: {score}
+              <br /> 레벨: {level}
+            </div>
+            <div className="p-2 rounded-lg shadow bg-white border flex flex-col justify-center items-center">
+              <NextQueue queue={isStarted ? nextQueue : []} />
+              <p className="text-xs mt-1 font-semibold text-gray-500">NEXT</p>
+            </div>
+
+            <div className="p-2 rounded-lg shadow bg-white border flex flex-col justify-center items-center">
+              <MiniBoard nextTetromino={holdTetromino} />
+              <p className="text-xs mt-1 font-semibold text-gray-500">HOLD</p>
+            </div>
+          </div>
         </>
+      ) : (
+        <></>
       )}
       <Modal isOpen={modalType !== null} onClose={() => setModalType(null)}>
         {modalType === "login" && (
@@ -483,13 +566,22 @@ const MainContent = () => {
               type="text"
               placeholder="아이디"
               className="border w-full mb-2 p-1 outline-0"
+              onChange={(e) => {
+                setInputId(e.target.value);
+              }}
             />
             <input
               type="password"
               placeholder="비밀번호"
               className="border w-full mb-4 p-1 outline-0"
+              onChange={(e) => {
+                setInputPW(e.target.value);
+              }}
             />
-            <button className="bg-blue-500 text-white px-4 py-2 rounded w-full">
+            <button
+              className="bg-blue-500 text-white px-4 py-2 rounded w-full"
+              onClick={handleLogin}
+            >
               로그인
             </button>
           </div>
@@ -501,18 +593,30 @@ const MainContent = () => {
               type="text"
               placeholder="아이디"
               className="border w-full mb-2 p-1 outline-0"
+              onChange={(e) => {
+                setInputId(e.target.value);
+              }}
             />
             <input
               type=""
               placeholder="이름"
               className="border w-full mb-2 p-1 outline-0"
+              onChange={(e) => {
+                setInputName(e.target.value);
+              }}
             />
             <input
               type="password"
               placeholder="비밀번호"
               className="border w-full mb-4 p-1 outline-0"
+              onChange={(e) => {
+                setInputPW(e.target.value);
+              }}
             />
-            <button className="bg-green-500 text-white px-4 py-2 rounded w-full">
+            <button
+              className="bg-green-500 text-white px-4 py-2 rounded w-full"
+              onClick={handleSignUp}
+            >
               회원가입
             </button>
           </div>
@@ -521,7 +625,7 @@ const MainContent = () => {
           <div className="text-center">
             <h2 className="text-2xl font-bold mb-4">게임 종료</h2>
             <p className="mb-4">
-              다시 하시겠습니까?
+              레벨은 {level}단계입니다.
               <br />
               점수는 {score}점입니다.
             </p>
@@ -584,9 +688,19 @@ const MainContent = () => {
               placeholder="프로필 이미지 URL"
               className="border w-full mb-4 p-1"
             />
+
+            <label className="flex items-center mb-4 select-none">
+              <input
+                type="checkbox"
+                checked={showGhost}
+                onChange={(e) => setShowGhost(e.target.checked)}
+                className="mr-2"
+              />
+              고스트 블럭 표시하기
+            </label>
+
             <button
               onClick={() => {
-                // 프로필 업데이트 로직 예시
                 setUser((prev) => ({
                   ...prev,
                   username: "새 이름",
