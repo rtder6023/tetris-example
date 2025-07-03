@@ -27,7 +27,14 @@ export const axios = async (url, method, body) => {
     const { data, status } = response;
     return { data, status };
   } catch (err) {
-    const { data, status } = err.response;
-    return { data, status };
+    // err.response가 undefined일 수 있으므로 안전하게 처리
+    if (err.response) {
+      const { data, status } = err.response;
+      return { data, status };
+    } else {
+      // 네트워크 오류나 서버 연결 실패 등의 경우
+      console.error("API 요청 실패:", err.message);
+      return { data: null, status: 500 };
+    }
   }
 };

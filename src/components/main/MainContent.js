@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useContext } from "react";
 import MiniBoard from "../miniBoard/MiniBoard";
 import { randomTetromino } from "@/components/tetromino/Tetromino";
-import { Tetromino_Show, Tetromino } from "@/components/tetromino/Tetromino";
 import Modal from "../modal/Modal";
 import NextQueue from "../nextqueue/NextQueue";
 import { axios } from "@/libs/axios/axios";
@@ -35,6 +34,11 @@ const MainContent = () => {
   const [inputId, setInputId] = useState("");
   const [inputPW, setInputPW] = useState("");
   const [inputName, setInputName] = useState("");
+  const [inputLocked, setInputLocked] = useState(false);
+  const [profileImageFile, setProfileImageFile] = useState(null);
+  const [topPlayers, setTopPlayers] = useState([]);
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [showPlayerModal, setShowPlayerModal] = useState(false);
 
   const [nextQueue, setNextQueue] = useState(
     Array.from({ length: 5 }, () => randomTetromino())
@@ -54,12 +58,6 @@ const MainContent = () => {
     83, // level 10+
   ];
 
-  const findTetrominoNameByColor = (color) => {
-    return Object.entries(Tetromino).find(
-      ([_, val]) => val.color === color
-    )?.[0];
-  };
-
   const getGhostPosition = (board, tetromino, pos) => {
     let ghostPos = { ...pos };
     while (canMoveTo(board, tetromino, { x: ghostPos.x, y: ghostPos.y + 1 })) {
@@ -70,6 +68,7 @@ const MainContent = () => {
 
   const rotate = (matrix) => {
     const N = matrix.length;
+    3;
     const result = Array.from({ length: N }, () => Array(N).fill(0));
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
@@ -79,7 +78,22 @@ const MainContent = () => {
     return result;
   };
 
-  const resetGame = () => {
+  const resetGame = async () => {
+    scoreSavedRef.current = false; // 게임 시작 시 다시 초기화
+
+    if (user) {
+      try {
+        const { status } = await axios("/member/game", "POST");
+        if (status === 200) {
+          console.log("기록 완료");
+        } else {
+          console.error("기록 실패");
+        }
+      } catch (err) {
+        console.log("API 호출 실패:", err);
+      }
+    }
+
     setBoard(Array.from({ length: rows }, () => Array(cols).fill(0)));
     const initialQueue = Array.from({ length: 5 }, () => randomTetromino());
     setTetromino(initialQueue[0]);
@@ -215,12 +229,59 @@ const MainContent = () => {
   };
 
   useEffect(() => {
-    if (isGameOver) {
+    const fetchTopPlayers = async () => {
+      try {
+        const { data, status } = await axios("/member/game/top10", "GET");
+        console.log("TOP10 응답 데이터:", data); // 이걸 추가해서 콘솔에서 응답 구조 확인
+        if (status === 200) {
+          setTopPlayers(data);
+        }
+      } catch (err) {
+        console.log("Top 10 불러오기 실패:", err);
+      }
+    };
+
+    fetchTopPlayers();
+  }, []);
+
+  const scoreSavedRef = useRef(false); // 초기값 false
+
+  useEffect(() => {
+    const sendGameResult = async () => {
+      if (!user || scoreSavedRef.current) return;
+
+      try {
+        const { status } = await axios("/member/game/end", "POST", {
+          id: user.id,
+          score: score,
+        });
+
+        if (status === 200) {
+          console.log("성공");
+          scoreSavedRef.current = true; // 중복 저장 방지
+
+          const { data: meData, status: meStatus } = await axios(
+            "/common/me",
+            "GET"
+          );
+          if (meStatus === 200) {
+            setUser(meData);
+          }
+        } else {
+          console.error("실패");
+        }
+      } catch (err) {
+        console.log(err);
+      }
+    };
+
+    if (isGameOver && !scoreSavedRef.current) {
+      sendGameResult();
       setModalType("gameover");
     }
   }, [isGameOver]);
 
-  const intervalRef = useRef(null); // 이건 컴포넌트 최상단 useState 들 옆에 추가
+  const intervalRef = useRef(null);
 
   useEffect(() => {
     if (!tetromino || isGameOver || isPaused || !isStarted) return;
@@ -232,6 +293,9 @@ const MainContent = () => {
         if (canMoveTo(board, tetromino, nextPos)) {
           return nextPos;
         } else {
+          // 블럭이 멈추는 순간 -> 입력 잠금
+          setInputLocked(true);
+
           const mergedBoard = mergeBlock(board, tetromino, prevPos);
           const { newBoard, clearedLines } = clearLines(mergedBoard);
 
@@ -244,10 +308,6 @@ const MainContent = () => {
 
           const newTetromino = nextQueue[0];
           const newQueue = nextQueue.slice(1).concat(randomTetromino());
-
-          setTetromino(newTetromino);
-          setNextQueue(newQueue);
-
           const newNext = randomTetromino();
           const newStartPos = { x: 3, y: 0 };
 
@@ -256,11 +316,19 @@ const MainContent = () => {
             setShowRetryModal(true);
             return prevPos;
           } else {
-            setBoard(newBoard);
-            setTetromino(newTetromino);
-            setNextTetromino(newNext);
-            setCanHold(true);
-            return newStartPos;
+            setTimeout(() => {
+              // 병합 후에 약간의 딜레이를 두고 입력 해제
+              setBoard(newBoard);
+              setTetromino(newTetromino);
+              setNextQueue(newQueue);
+              setNextTetromino(newNext);
+              setPos(newStartPos);
+              setCanHold(true);
+              setInputLocked(false); // 다시 입력 가능
+            }, 30); // 약 1 frame 딜레이
+
+            // 즉시 반환은 이전 위치 그대로
+            return prevPos;
           }
         }
       });
@@ -271,10 +339,20 @@ const MainContent = () => {
 
     return () => clearInterval(intervalRef.current);
   }, [isStarted, isPaused, isGameOver, level, tetromino]);
-
+  useEffect(() => {
+    if (user) {
+      console.log("=== 유저 정보 확인 ===");
+      console.log("이름 (user.name):", user.name);
+      console.log("아이디 (user.username):", user.username);
+      console.log("소개글 (user.bio):", user.bio);
+      console.log("비밀번호 (user.pw):", user.pw);
+    } else {
+      console.log("user는 null입니다. (로그인 안됨)");
+    }
+  }, [user]);
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === "p" || e.key === "P") {
+      if (e.key === "p" || e.key === "P" || e.key === 32) {
         if (isStarted && !isGameOver) {
           if (!isPaused) {
             setIsPaused(true);
@@ -304,13 +382,18 @@ const MainContent = () => {
           setScore((prev) => prev + 1);
         }
       } else if (e.key === "ArrowUp") {
-        if (!upPressedRef.current) {
+        if (!inputLocked && !upPressedRef.current) {
           upPressedRef.current = true;
+
           const result = RotateWithKick(tetromino, board, pos);
           if (result) {
             setTetromino({ ...tetromino, shape: result.shape });
             setPos(result.newPos);
           }
+
+          setTimeout(() => {
+            upPressedRef.current = false;
+          }, 100);
         }
       } else if (e.key === " ") {
         let dropY = pos.y;
@@ -409,7 +492,7 @@ const MainContent = () => {
   }
 
   const handleLogin = async () => {
-    const { data, status } = await axios("/common/login", "POST", {
+    const { status } = await axios("/common/login", "POST", {
       username: inputId,
       pw: inputPW,
     });
@@ -417,14 +500,41 @@ const MainContent = () => {
     if (status === 200) {
       setModalType(null);
 
-      // axios -> 내 로그인된 정보를 반환받을거임(username, maxScore)
-      setUser(true);
+      const { data: meData, status: meStatus } = await axios(
+        "/common/me",
+        "get"
+      );
+      if (meStatus === 200) {
+        setUser(meData);
+      }
     } else {
       alert("아이디나 비밀번호를 확인해 주세요.");
     }
   };
 
+  const handleLogout = async () => {
+    const { status } = await axios("/member/logout", "POST");
+    if (status === 200) {
+      setUser(null);
+    }
+
+    // if (isStarted) {
+    //   const confirmLogout = window.confirm(
+    //     "게임을 저장하고 로그아웃 하시겠습니까?"
+    //   );
+    //   if (!confirmLogout) return;
+
+    //   resetGame();
+    // }
+    // setUser(null);
+  };
+
   const handleSignUp = async () => {
+    if (!inputId.trim() || !inputPW.trim() || !inputName.trim()) {
+      alert("아이디, 비밀번호, 이름을 모두 입력해 주세요.");
+      return;
+    }
+
     const { data, status } = await axios("/common/user", "POST", {
       username: inputId,
       pw: inputPW,
@@ -443,31 +553,43 @@ const MainContent = () => {
       {/* 왼쪽 사이드 */}
       <div className="flex flex-col w-[200px] gap-3 text-center">
         <div className="bg-white p-3 rounded-lg shadow border  font-bold text-lg">
-          {user ? user.username : "GUEST"}
+          {user ? user.name : "GUEST"} {/* 이름 */}
         </div>
 
         {user && (
           <div className="bg-white p-2 rounded-lg shadow border text-sm">
-            최고 점수: {user.highScore}
+            최고 점수: {user.score}
           </div>
         )}
+
+        <div className="bg-white p-2 rounded-lg shadow border text-sm overflow-auto max-h-[300px]">
+          <h3 className="font-bold mb-2 text-center">TOP 10</h3>
+          {topPlayers.length > 0 ? (
+            <ul className="text-left text-xs space-y-1">
+              {topPlayers.map((player, idx) => (
+                <li
+                  key={idx}
+                  className="cursor-pointer hover:underline"
+                  onClick={() => {
+                    setSelectedPlayer({ ...player, rank: idx + 1 });
+                    setShowPlayerModal(true);
+                  }}
+                >
+                  {idx + 1}. {player.name} - {player.score}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-gray-400 text-center">불러오는 중...</p>
+          )}
+        </div>
 
         <div className="space-y-2 mt-auto">
           {user ? (
             <>
               <button
                 className="w-full py-1 bg-red-500 text-white rounded shadow hover:bg-red-600"
-                onClick={() => {
-                  if (isStarted) {
-                    const confirmLogout = window.confirm(
-                      "게임을 저장하고 로그아웃 하시겠습니까?"
-                    );
-                    if (!confirmLogout) return;
-
-                    resetGame();
-                  }
-                  setUser(null);
-                }}
+                onClick={handleLogout}
               >
                 로그아웃
               </button>
@@ -670,24 +792,31 @@ const MainContent = () => {
         {modalType === "settings" && user && (
           <div>
             <h2 className="text-xl font-bold mb-4">프로필 설정</h2>
+            <p className="text-sm text-gray-400">이름</p>
+
             <input
               type="text"
-              defaultValue={user.username}
+              defaultValue={user.name}
               placeholder="유저 이름"
               className="border w-full mb-2 p-1"
             />
-            <input
-              type="text"
+
+            <p className="text-sm text-gray-400">소개글</p>
+            <textarea
               defaultValue={user.bio}
               placeholder="소개글"
-              className="border w-full mb-2 p-1"
+              className="border w-full mb-2 p-1 resize-none h-24"
             />
-            <input
-              type="text"
-              defaultValue={user.profile}
-              placeholder="프로필 이미지 URL"
-              className="border w-full mb-4 p-1"
-            />
+
+            <label className="text-white py-2 px-4 rounded cursor-pointer text-center"></label>
+
+            {profileImageFile ? (
+              <p className="text-sm text-gray-600">
+                선택된 파일: {profileImageFile.name}
+              </p>
+            ) : (
+              <p className="text-sm text-gray-400">파일을 선택해 주세요</p>
+            )}
 
             <label className="flex items-center mb-4 select-none">
               <input
@@ -700,19 +829,54 @@ const MainContent = () => {
             </label>
 
             <button
-              onClick={() => {
-                setUser((prev) => ({
-                  ...prev,
-                  username: "새 이름",
-                  bio: "새 소개글",
-                  profile: "새 URL",
-                }));
-                setModalType(null);
+              onClick={async () => {
+                const formData = new FormData();
+                if (profileImageFile) {
+                  formData.append("file", profileImageFile);
+                }
+                formData.append("name", user.name);
+                formData.append("bio", user.bio || "");
+
+                const { data, status } = await axios(
+                  "/member/profile",
+                  "POST",
+                  formData,
+                  {
+                    headers: { "Content-Type": "multipart/form-data" },
+                  }
+                );
+
+                if (status === 200) {
+                  setUser(data);
+                  setModalType(null);
+                } else {
+                  alert("프로필 업데이트에 실패했습니다.");
+                }
               }}
               className="bg-green-500 text-white px-4 py-2 rounded w-full"
             >
               저장
             </button>
+          </div>
+        )}
+      </Modal>
+      <Modal isOpen={showPlayerModal} onClose={() => setShowPlayerModal(false)}>
+        {selectedPlayer && (
+          <div className="space-y-4 text-center">
+            <div className="flex justify-between gap-2">
+              <div className="border px-4 py-2 rounded">
+                최고 점수: {selectedPlayer.score}
+              </div>
+              <div className="border px-4 py-2 rounded">
+                현재 랭킹: {selectedPlayer.rank}등
+              </div>
+            </div>
+            <div className="border px-4 py-2 rounded">
+              유저 이름: {selectedPlayer.name}
+            </div>
+            <div className="border px-4 py-2 rounded h-24 overflow-y-auto whitespace-pre-wrap text-left">
+              소개글: {selectedPlayer.bio || "없음"}
+            </div>
           </div>
         )}
       </Modal>

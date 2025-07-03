@@ -8,7 +8,7 @@ export const UserContextProvider = ({ children }) => {
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data, status } = await axios("url", "get");
+      const { data, status } = await axios("/common/me", "get");
       if (status === 200) {
         setUser(data);
       }
