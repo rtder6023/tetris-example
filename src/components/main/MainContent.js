@@ -35,6 +35,8 @@ const MainContent = () => {
   const [inputPW, setInputPW] = useState("");
   const [inputName, setInputName] = useState("");
   const [inputLocked, setInputLocked] = useState(false);
+  const [editName, setEditName] = useState(user?.name || "");
+  const [editBio, setEditBio] = useState(user?.bio || "");
   const [profileImageFile, setProfileImageFile] = useState(null);
   const [topPlayers, setTopPlayers] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
@@ -79,13 +81,14 @@ const MainContent = () => {
   };
 
   const resetGame = async () => {
-    scoreSavedRef.current = false; // 게임 시작 시 다시 초기화
+    scoreSavedRef.current = false;
 
     if (user) {
       try {
         const { status } = await axios("/member/game", "POST");
         if (status === 200) {
           console.log("기록 완료");
+          await fetchTopPlayers();
         } else {
           console.error("기록 실패");
         }
@@ -229,18 +232,24 @@ const MainContent = () => {
   };
 
   useEffect(() => {
-    const fetchTopPlayers = async () => {
-      try {
-        const { data, status } = await axios("/member/game/top10", "GET");
-        console.log("TOP10 응답 데이터:", data); // 이걸 추가해서 콘솔에서 응답 구조 확인
-        if (status === 200) {
-          setTopPlayers(data);
-        }
-      } catch (err) {
-        console.log("Top 10 불러오기 실패:", err);
-      }
-    };
+    if (modalType === "settings" && user) {
+      setEditName(user.name || "");
+      setEditBio(user.bio || "");
+    }
+  }, [modalType, user]);
 
+  const fetchTopPlayers = async () => {
+    try {
+      const { data, status } = await axios("/member/game/top10", "GET");
+      if (status === 200) {
+        setTopPlayers(data);
+      }
+    } catch (err) {
+      console.log("Top 10 불러오기 실패:", err);
+    }
+  };
+
+  useEffect(() => {
     fetchTopPlayers();
   }, []);
 
@@ -317,17 +326,15 @@ const MainContent = () => {
             return prevPos;
           } else {
             setTimeout(() => {
-              // 병합 후에 약간의 딜레이를 두고 입력 해제
               setBoard(newBoard);
               setTetromino(newTetromino);
               setNextQueue(newQueue);
               setNextTetromino(newNext);
               setPos(newStartPos);
               setCanHold(true);
-              setInputLocked(false); // 다시 입력 가능
-            }, 30); // 약 1 frame 딜레이
+              setInputLocked(false);
+            }, 30);
 
-            // 즉시 반환은 이전 위치 그대로
             return prevPos;
           }
         }
@@ -796,14 +803,16 @@ const MainContent = () => {
 
             <input
               type="text"
-              defaultValue={user.name}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
               placeholder="유저 이름"
               className="border w-full mb-2 p-1"
             />
 
             <p className="text-sm text-gray-400">소개글</p>
             <textarea
-              defaultValue={user.bio}
+              value={editBio}
+              onChange={(e) => setEditBio(e.target.value)}
               placeholder="소개글"
               className="border w-full mb-2 p-1 resize-none h-24"
             />
@@ -830,25 +839,21 @@ const MainContent = () => {
 
             <button
               onClick={async () => {
-                const formData = new FormData();
-                if (profileImageFile) {
-                  formData.append("file", profileImageFile);
-                }
-                formData.append("name", user.name);
-                formData.append("bio", user.bio || "");
-
-                const { data, status } = await axios(
-                  "/member/profile",
-                  "POST",
-                  formData,
-                  {
-                    headers: { "Content-Type": "multipart/form-data" },
-                  }
-                );
+                const { data, status } = await axios("/member/me", "PATCH", {
+                  name: editName,
+                  bio: editBio,
+                });
 
                 if (status === 200) {
-                  setUser(data);
-                  setModalType(null);
+                  const { data: updatedUser, status: meStatus } = await axios(
+                    "/common/me",
+                    "GET"
+                  );
+                  if (meStatus === 200) {
+                    setUser(updatedUser);
+                    fetchTopPlayers();
+                    setModalType(null);
+                  }
                 } else {
                   alert("프로필 업데이트에 실패했습니다.");
                 }
